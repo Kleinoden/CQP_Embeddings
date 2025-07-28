@@ -15,8 +15,8 @@ import GWG_shareholder_check
 import string
 punctuation_set = set(string.punctuation)
 
-input_path = r'/home/steffen88/Documents/Direga_Docs/clean_docs_mus_test'
-output_path = r'/home/steffen88/Documents/Direga_Docs/corpus_for_embedding.txt'
+input_path = r'/home/steffen88/Documents/PHD/Embedding_Queries/clean_docs_mus_test'
+output_path = r'/home/steffen88/Documents/PHD/Embedding_Queries/corpus_for_embedding.txt'
 
 
 
@@ -73,14 +73,14 @@ def get_token_embeddings(text):
         is_subword = token.startswith("##")
 
         # New word boundary: if not a subword or there's a gap in text
-        if (not is_subword and current_embeds and start > last_end) or token in punctuation_set:
-
-            word_vec = torch.stack(current_embeds).mean(dim=0)
-            word_embeddings.append(word_vec)
-            word_tokens.append(current_word)
-            current_word = text[start:end]
-            print("current word", current_word)
-            current_embeds = [subword_embeddings[i]]
+        if (not is_subword and start > last_end) or token in punctuation_set:
+            if current_embeds:
+                word_vec = torch.stack(current_embeds).mean(dim=0)
+                word_embeddings.append(word_vec)
+                word_tokens.append(current_word)
+                current_word = text[start:end]
+                #print("current word", current_word)
+                current_embeds = [subword_embeddings[i]]
         else:
             # Same word or subword continuation
             if is_subword:
@@ -93,7 +93,7 @@ def get_token_embeddings(text):
 
     # Add last word
     if current_embeds:
-        print("current word", current_word)
+        #print("current word", current_word)
         word_vec = torch.stack(current_embeds).mean(dim=0)
         word_embeddings.append(word_vec)
         word_tokens.append(current_word)
@@ -184,7 +184,7 @@ faiss.normalize_L2(vecs_np)
 index = faiss.IndexFlatIP(vecs_np.shape[1])           # or L2 depending on use
 index_id = faiss.IndexIDMap(index)
 index_id.add_with_ids(vecs_np, ids_np)
-faiss.write_index(index_id, "/home/steffen88/Documents/Direga_Docs/bert_token_index.faiss")
+faiss.write_index(index_id, "/home/steffen88/Documents/PHD/Embedding_Queries/bert_token_index.faiss")
 
 
 
