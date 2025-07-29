@@ -8,6 +8,9 @@ import os
 import re
 import chardet
 import logging
+import pickle
+import spacy
+nlp = spacy.load("de_core_news_sm")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 sys.path.append('/home/steffen88/repos/annotations/Korpusaufbereitung_Zwischenverfügungen')
@@ -65,15 +68,15 @@ def get_token_embeddings(text):
 
     for i, (token, offset) in enumerate(zip(token_strings, offsets)):
         start, end = offset.tolist()
-        #print("token in loop",token)
+        print("token in loop",token)
         # Skip special tokens
         if token in tokenizer.all_special_tokens or (start == end == 0):
             continue
 
         is_subword = token.startswith("##")
-
+        is_punct = token in punctuation_set
         # New word boundary: if not a subword or there's a gap in text
-        if (not is_subword and start > last_end) or token in punctuation_set:
+        if (not is_subword and start > last_end) or is_punct:
             if current_embeds:
                 word_vec = torch.stack(current_embeds).mean(dim=0)
                 word_embeddings.append(word_vec)
@@ -81,6 +84,10 @@ def get_token_embeddings(text):
                 current_word = text[start:end]
                 #print("current word", current_word)
                 current_embeds = [subword_embeddings[i]]
+            current_word = token if is_punct else text[start:end]
+            current_embeds = [subword_embeddings[i]]
+                
+                
         else:
             # Same word or subword continuation
             if is_subword:
@@ -98,8 +105,10 @@ def get_token_embeddings(text):
         word_embeddings.append(word_vec)
         word_tokens.append(current_word)
 
-    
-
+    print("\n---")
+    print("text sent: ", text)
+    print("word tokens: ", word_tokens)
+    print("---\n")
     return subword_embeddings, token_strings, tokens["offset_mapping"][0], word_tokens, word_embeddings
 
 
@@ -157,7 +166,8 @@ with open(output_path, 'w', encoding="utf-8") as output_file:
                                 "sentence": sent,
                                 "bert_idx": i,
                                 "sent_ind": sent_ind,
-                                "text_id" : filename.replace(".txt",'')
+                                "text_id" : filename.replace(".txt",''),
+                                "vector"  : vec.cpu().numpy()
                             }
 
                             token_counter += 1
@@ -177,6 +187,8 @@ for num in range(10):
 vecs_np = np.array(embedding_vectors).astype("float32")
 ids_np = np.array(corpus_token_ids).astype("int64")
 
+
+
 # Normalize if using cosine similarity
 faiss.normalize_L2(vecs_np)
 
@@ -185,6 +197,16 @@ index = faiss.IndexFlatIP(vecs_np.shape[1])           # or L2 depending on use
 index_id = faiss.IndexIDMap(index)
 index_id.add_with_ids(vecs_np, ids_np)
 faiss.write_index(index_id, "/home/steffen88/Documents/PHD/Embedding_Queries/bert_token_index.faiss")
+
+with open("/home/steffen88/Documents/PHD/Embedding_Queries/token_info_by_id.pkl", "wb") as f:
+    pickle.dump(token_info_by_id, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+
+# vector = token_info_by_id[0]["vector"]
+
+# print("VECTOR FOr token 0:")
+# print(vector)
 
 
 
@@ -201,62 +223,7 @@ faiss.write_index(index_id, "/home/steffen88/Documents/PHD/Embedding_Queries/ber
 # # Add to FAISS
 # index.add(embedding_matrix)
 
-# # Optional: Save the index
-# faiss.write_index(index, "/home/steffen88/repos/CQP_Embeddings/corpus_embeddings.faiss")
 
-
-
-# def encode_embedding_corpus(input_path, output_path):
-#     nlp = spacy.load("de_core_news_sm")
-#     with open(output_path, 'w', encoding="utf-8") as output_file:
-#         output_file.write(f"<corpus>" + '\n')
-#         for i,filename in enumerate(os.listdir(input_path)):
-#             print(f"Processing file {filename}, file  {i} out of {len(os.listdir(input_path))}")
-#             if i > 1000:
-#                 break
-#             if filename.endswith('.txt'):
-#                 file_path = os.path.join(input_path, filename)
-#                 try:
-#                     with open(file_path, "rb") as f:
-#                         content = f.read()
-#                         encoding = chardet.detect(content)['encoding']
-#                     with open(file_path, 'r', encoding = encoding) as file:
-#                         content = file.read()
-                       
-#                 except UnicodeDecodeError as e:
-#                     logger.exception(f"Failed to read {filename}: {e}")
-             
-                
-#                 output_file.write(f"<text id={filename[:-4]}>" + '\n')  
-#                 sentences = GWG_shareholder_check.preprocess_raw(content)
-#                 sentences = GWG_shareholder_check.restore_abbreviations(sentences)
-#                 #print("sentences:\n", sentences)
-#                 for sent in sentences:
-#                     # sent = restore_abbr_periods_per_sent(sent, reversed_dict)
-#                     sent = sent.strip()
-#                     if sent == '\n':
-#                         continue
-#                     pos_lems= [(token.text,token.tag_, token.lemma_) for token in nlp(sent) if token.text != '\n']
-#                     spacy_tokens = [i[0] for i in pos_lems]
-#                     sent = ' '.join(spacy_tokens)
-#                     ner_tagged = ner_tag_sentence(sent,pos_lems)
-#                     output_file.write(f"<s>" + '\n')
-#                     for i,item in enumerate(ner_tagged):
-#                         if isinstance(item, str):
-#                             output_file.write(item+ "\n")
-#                         else:
-#                             output_file.write(item[0]+"\t"+item[1]+"\t"+item[2]+ "\n")
-#                     output_file.write(f"</s>" + '\n')
-
-
-#                 output_file.write(f"</text>" + '\n')
-#         output_file.write(f"</corpus>")
-#         print(f"We found {invalid} invalid docs")
-
-
-
-
-#to do; integration of similarity search into query
 """create method that takes in a query with a place holder for embedding token
 may we can give a temporary syntax like so:
 query string arg:  [] [] EMBEDDING [] []
