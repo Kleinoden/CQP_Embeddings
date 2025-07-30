@@ -10,6 +10,7 @@ import chardet
 import logging
 import pickle
 import spacy
+from spacy.tokens import Doc
 nlp = spacy.load("de_core_news_sm")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -68,7 +69,6 @@ def get_token_embeddings(text):
 
     for i, (token, offset) in enumerate(zip(token_strings, offsets)):
         start, end = offset.tolist()
-        print("token in loop",token)
         # Skip special tokens
         if token in tokenizer.all_special_tokens or (start == end == 0):
             continue
@@ -105,10 +105,10 @@ def get_token_embeddings(text):
         word_embeddings.append(word_vec)
         word_tokens.append(current_word)
 
-    print("\n---")
-    print("text sent: ", text)
-    print("word tokens: ", word_tokens)
-    print("---\n")
+    # print("\n---")
+    # print("text sent: ", text)
+    # print("word tokens: ", word_tokens)
+    # print("---\n")
     return subword_embeddings, token_strings, tokens["offset_mapping"][0], word_tokens, word_embeddings
 
 
@@ -152,10 +152,16 @@ with open(output_path, 'w', encoding="utf-8") as output_file:
                         output_file.write(f"<s>" + '\n')
                        
                         embeddings, token_strings, offsets, word_tokens, word_embeddings = get_token_embeddings(sent)
-                        for i, (vec, tok) in enumerate(zip(word_embeddings, word_tokens)):
+                        doc = Doc(nlp.vocab, words=word_tokens)  # create custom Doc
+                        doc = nlp(doc)
+                        pos_tags = [token.pos_ for token in doc]
+                        # for token in doc:
+                        #     print("spacy:", token.text, token.pos_, token.tag_)
+                        
+                        for i, (vec, tok,pos) in enumerate(zip(word_embeddings, word_tokens, pos_tags)):
                         
                             
-                            output_file.write(tok + '\n')
+                            output_file.write(tok +"\t"+pos+ "\n")
 
                             # Save with CWB token index as key
                             embedding_vectors.append(vec.numpy())
