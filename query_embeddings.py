@@ -16,38 +16,6 @@ with open("/home/steffen88/Documents/PHD/Embedding_Queries/token_info_by_id.pkl"
 index_id = faiss.read_index("/home/steffen88/Documents/PHD/Embedding_Queries/bert_token_index.faiss")
 
 
-# tokenizer = AutoTokenizer.from_pretrained("deepset/gbert-base")
-# model = AutoModel.from_pretrained("deepset/gbert-base")
-# model.eval()
-
-# def get_token_embedding(sentence, target_word):
-#     encoded = tokenizer(sentence, return_tensors="pt", return_offsets_mapping=True)
-#     inputs = {k: v for k, v in encoded.items() if k != "offset_mapping"}    
-#     with torch.no_grad():
-#         outputs = model(**inputs)
-
-#     embeddings = outputs.last_hidden_state.squeeze(0)  # [seq_len, hidden_dim]
-#     tokens = tokenizer.convert_ids_to_tokens(inputs.input_ids.squeeze(0))
-#     offsets = inputs["offset_mapping"].squeeze(0)
-
-#     # Find the index of the target word by matching text spans
-#     decoded = tokenizer.decode(inputs.input_ids[0])
-#     word_start = sentence.lower().find(target_word.lower())
-
-#     # Match the correct token index
-#     for i, (start, end) in enumerate(offsets.tolist()):
-#         if start <= word_start < end:
-#             return embeddings[i].cpu().numpy()  # Return vector for matched subtoken
-
-#     raise ValueError(f"Could not find token for word '{target_word}' in sentence.")
-
-
-# target_vec = get_token_embedding(
-#     sentence="Die Gesellschaft wurde als Unternehmen gegründet.",
-#     target_word="Gesellschaft"
-# )
-
-# print("target vec: ", target_vec)
 
 tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
 model = AutoModel.from_pretrained("bert-base-uncased")
@@ -168,8 +136,6 @@ def cqp_query(query, corpus_name="CWB_EMBEDDINGS", registry="/home/steffen88/Doc
     
     return matches
 
-# matches = cqp_query('[lemma="der"];')
-# print(matches)
 
 
 
