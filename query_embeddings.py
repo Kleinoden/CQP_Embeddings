@@ -139,75 +139,100 @@ target_token, target_embedding = get_token_embedding(
 
 print("target embedding: ", target_embedding)
 
-# def cqp_query(query, corpus_name="CWB_EMBEDDINGS", registry="/home/steffen88/Documents/PHD/Embedding_Queries/cwb_embedding_test/registry"):
-#     commands = [
-#         "set AutoShow on;",  # Re-enable automatic display
-#         f"{corpus_name};",
-#         query,
-#     ]
+def cqp_query(query, corpus_name="CWB_EMBEDDINGS", registry="/home/steffen88/Documents/PHD/Embedding_Queries/cwb_embedding_test/registry"):
+    commands = [
+        "set AutoShow on;",  # Re-enable automatic display
+        f"{corpus_name};",
+        query,
+    ]
     
-#     full_query = '\n'.join(commands)
-#     #full_query = f'{corpus_name};\n[word="{query}"];\n'
+    full_query = '\n'.join(commands)
+    #full_query = f'{corpus_name};\n[word="{query}"];\n'
     
-#     cmd = ['cqp', '-r', registry, '-c']
+    cmd = ['cqp', '-r', registry, '-c']
     
-#     print("Running CQP command:", ' '.join(cmd))
-#     print("Sending query:", repr(full_query))
+    print("Running CQP command:", ' '.join(cmd))
+    print("Sending query:", repr(full_query))
     
-#     result = subprocess.run(cmd, input=full_query, capture_output=True, text=True)
+    result = subprocess.run(cmd, input=full_query, capture_output=True, text=True)
     
-#     # print("Raw CQP output:\n", result.stdout)
-#     # print("Raw stderr:\n", result.stderr)
-#     # print("Return code:", result.returncode)
+    # print("Raw CQP output:\n", result.stdout)
+    # print("Raw stderr:\n", result.stderr)
+    # print("Return code:", result.returncode)
     
-#     matches = []
-#     for line in result.stdout.splitlines():
-#         m = re.match(r"^\s*(\d+):", line)
-#         if m:
-#             matches.append(int(m.group(1)))
+    matches = []
+    for line in result.stdout.splitlines():
+        m = re.match(r"^\s*(\d+):", line)
+        if m:
+            matches.append(int(m.group(1)))
     
-#     return matches
+    return matches
 
-# # matches = cqp_query('[lemma="der"];')
-# # print(matches)
-
-
-
-# def create_faiss_subset(matches):
-
-#     matched_ids_np = np.array(matches, dtype=np.int64)
+# matches = cqp_query('[lemma="der"];')
+# print(matches)
 
 
-#     vecs = []
-#     ids = []
 
-#     for tok_id in matches:
-#         if tok_id in token_info_by_id:
-#             vec = token_info_by_id[tok_id]["vector"]  # Should be a 1D np.array
-#             vecs.append(vec)
-#             ids.append(tok_id)
+def create_faiss_subset(matches):
+
+    matched_ids_np = np.array(matches, dtype=np.int64)
+
+
+    vecs = []
+    ids = []
+
+    for tok_id in matches:
+        if tok_id in token_info_by_id:
+            vec = token_info_by_id[tok_id]["vector"]  # Should be a 1D np.array
+            vecs.append(vec)
+            ids.append(tok_id)
             
             
-#     vecs_np = np.array(vecs).astype("float32")
-#     ids_np = np.array(ids).astype("int64")
+    vecs_np = np.array(vecs).astype("float32")
+    ids_np = np.array(ids).astype("int64")
 
-#     faiss.normalize_L2(vecs_np)
+    faiss.normalize_L2(vecs_np)
 
-#     subset_index = faiss.IndexFlatIP(vecs_np.shape[1])  # IP = inner product (for cosine)
-#     subset_index_idmap = faiss.IndexIDMap(subset_index)
-#     subset_index_idmap.add_with_ids(vecs_np, ids_np)
+    subset_index = faiss.IndexFlatIP(vecs_np.shape[1])  # IP = inner product (for cosine)
+    subset_index_idmap = faiss.IndexIDMap(subset_index)
+    subset_index_idmap.add_with_ids(vecs_np, ids_np)
     
-#     return subset_index_idmap
+    return subset_index_idmap
 
 
 
-# def return_query_faiss_subset(query):
-#     matches = cqp_query(query)
-#     subset_index_idmap=  create_faiss_subset(matches)
-#     return subset_index_idmap
+def return_query_faiss_subset(query):
+    matches = cqp_query(query)
+    subset_index_idmap=  create_faiss_subset(matches)
+    return subset_index_idmap
 
 
-# faiss_subset = return_query_faiss_subset('[lemma= "Gesellschaft"];')
 
-# print(type(faiss_subset))
 
+
+
+def query_embedding_similarity(query,target_word, target_context,  threshold = 0.8):
+    
+    
+    faiss_subset = return_query_faiss_subset(query)
+    # Get embedding of word "Gesellschaft" in clarifying sentence
+    token, query_vec = get_token_embedding(target_context, target_word)
+    query_vec_np = query_vec.detach().cpu().numpy().reshape(1, -1)
+    faiss.normalize_L2(query_vec_np)
+
+    # Search for top 50 most similar tokens in the subset FAISS index
+    D, I = faiss_subset.search(query_vec.reshape(1, -1), k=50)
+
+    # Filter results by cosine similarity threshold (e.g., 0.8)
+    filtered = [(i, float(d)) for i, d in zip(I[0], D[0]) if d >= threshold]
+    return filtered
+
+
+
+
+
+
+
+emb_matches = query_embedding_similarity('[lemma= "Gesellschaft"];',"Gesellschaft", "Die Gesellschaft wurde gegründet.")
+
+print("Matches based on embedding similarity: ", emb_matches)
