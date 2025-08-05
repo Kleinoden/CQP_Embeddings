@@ -3,6 +3,11 @@ import faiss
 import subprocess
 import re
 import shlex
+import numpy as np
+from transformers import AutoTokenizer, AutoModel
+import torch
+import string
+punctuation_set = set(string.punctuation)
 
 with open("/home/steffen88/Documents/PHD/Embedding_Queries/token_info_by_id.pkl", "rb") as f:
     token_info_by_id = pickle.load(f)
@@ -11,134 +16,198 @@ with open("/home/steffen88/Documents/PHD/Embedding_Queries/token_info_by_id.pkl"
 index_id = faiss.read_index("/home/steffen88/Documents/PHD/Embedding_Queries/bert_token_index.faiss")
 
 
-# def cqp_query(query, corpus_name=r"/home/steffen88/Documents/PHD/Embedding_Queries/cwb_embedding_test"):
-#     # Run the CQP query through CCC
-#     cmd = f'echo "{query};" | cqp -c {corpus_name}'
-#     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+# tokenizer = AutoTokenizer.from_pretrained("deepset/gbert-base")
+# model = AutoModel.from_pretrained("deepset/gbert-base")
+# model.eval()
 
-#     matches = []
-#     for line in result.stdout.splitlines():
-#         # Match IDs inside [ ]
-#         m = re.match(r"\[(\d+)\]", line.strip())
-#         if m:
-#             token_id = int(m.group(1))
-#             matches.append(token_id)
+# def get_token_embedding(sentence, target_word):
+#     encoded = tokenizer(sentence, return_tensors="pt", return_offsets_mapping=True)
+#     inputs = {k: v for k, v in encoded.items() if k != "offset_mapping"}    
+#     with torch.no_grad():
+#         outputs = model(**inputs)
 
-#     return matches
+#     embeddings = outputs.last_hidden_state.squeeze(0)  # [seq_len, hidden_dim]
+#     tokens = tokenizer.convert_ids_to_tokens(inputs.input_ids.squeeze(0))
+#     offsets = inputs["offset_mapping"].squeeze(0)
 
-# matches = cqp_query("und")
-# print(matches)
+#     # Find the index of the target word by matching text spans
+#     decoded = tokenizer.decode(inputs.input_ids[0])
+#     word_start = sentence.lower().find(target_word.lower())
 
+#     # Match the correct token index
+#     for i, (start, end) in enumerate(offsets.tolist()):
+#         if start <= word_start < end:
+#             return embeddings[i].cpu().numpy()  # Return vector for matched subtoken
+
+#     raise ValueError(f"Could not find token for word '{target_word}' in sentence.")
+
+
+# target_vec = get_token_embedding(
+#     sentence="Die Gesellschaft wurde als Unternehmen gegründet.",
+#     target_word="Gesellschaft"
+# )
+
+# print("target vec: ", target_vec)
+
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+model = AutoModel.from_pretrained("bert-base-uncased")
+model.eval()
+
+def get_token_embedding(text, target_word):
+    tokens = tokenizer(text, return_tensors="pt", return_offsets_mapping=True)
+    #print("tokens from bert: ", tokens)
+    #print('tokens["input_ids"][0]', tokens["input_ids"][0])
+    model_inputs = {k: tokens[k] for k in ['input_ids', 'attention_mask', 'token_type_ids'] if k in tokens}
+
+    with torch.no_grad():
+        output = model(**model_inputs)
+
+    # Remove batch dim: [1, seq_len, hidden] → [seq_len, hidden]
+    subword_embeddings = output.last_hidden_state.squeeze(0)
+    #print("lenght of subword embeddings", len(subword_embeddings))
+    offsets = tokens["offset_mapping"][0]
+    #print("offsets", offsets)
+    # Get token ids for mapping back to original text (optional)
+    token_strings = tokenizer.convert_ids_to_tokens(tokens["input_ids"][0])
+    #print("length of token strings: ", len(token_strings))
+    
+    word_embeddings = []
+    word_tokens = []
+    current_word = ""
+    current_embeds = []
+    current_start = None
+    last_end = -1
+
+    for i, (token, offset) in enumerate(zip(token_strings, offsets)):
+        start, end = offset.tolist()
+        # Skip special tokens
+        if token in tokenizer.all_special_tokens or (start == end == 0):
+            continue
+
+        is_subword = token.startswith("##")
+        is_punct = token in punctuation_set
+        # New word boundary: if not a subword or there's a gap in text
+        if (not is_subword and start > last_end) or is_punct:
+            if current_embeds:
+                word_vec = torch.stack(current_embeds).mean(dim=0)
+                word_embeddings.append(word_vec)
+                word_tokens.append(current_word)
+                current_word = text[start:end]
+                #print("current word", current_word)
+                current_embeds = [subword_embeddings[i]]
+            current_word = token if is_punct else text[start:end]
+            current_embeds = [subword_embeddings[i]]
+                
+                
+        else:
+            # Same word or subword continuation
+            if is_subword:
+                current_word += token[2:]  # remove "##"
+            else:
+                current_word += text[start:end]
+            current_embeds.append(subword_embeddings[i])
+
+        last_end = end
+
+    # Add last word
+    if current_embeds:
+        #print("current word", current_word)
+        word_vec = torch.stack(current_embeds).mean(dim=0)
+        word_embeddings.append(word_vec)
+        word_tokens.append(current_word)
+        
+    target_index = None
+    for i, tok in enumerate(word_tokens):
+        if tok == target_word:
+            target_index = i
+            break
+
+    print("\n---")
+    print("text sent: ", text)
+    print("word tokens: ", word_tokens)
+    print("len of word tokens", len(word_tokens))
+    print("len of word embeddings", len(word_embeddings))
+    print("---\n")
+    return word_tokens[i], word_embeddings[i]
+
+
+
+target_token, target_embedding = get_token_embedding(
+    text="Die Gesellschaft wurde als Unternehmen gegründet.",
+    target_word="Gesellschaft"
+)
+
+print("target embedding: ", target_embedding)
 
 # def cqp_query(query, corpus_name="CWB_EMBEDDINGS", registry="/home/steffen88/Documents/PHD/Embedding_Queries/cwb_embedding_test/registry"):
-#     #cmd = f'echo "{query};" | cqp -r {registry} -c {corpus_name}'
-#     cmd = f'echo "{query}"; | cqp -r {registry} -c {corpus_name}'
-
-#     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+#     commands = [
+#         "set AutoShow on;",  # Re-enable automatic display
+#         f"{corpus_name};",
+#         query,
+#     ]
     
-#     print("Raw CQP output:")
-#     print(result.stdout)
-#     print("Raw stderr:")
-#     print(result.stderr)
-
-#     matches = []
-#     for line in result.stdout.splitlines():
-#         m = re.match(r"\[(\d+)\]", line.strip())
-#         if m:
-#             token_id = int(m.group(1))
-#             matches.append(token_id)
-
-#     return matches
-
-
-
-# def cqp_query(query, corpus_name, registry):
-#     full_cmd = f'echo {shlex.quote(query)}; | cqp -r {shlex.quote(registry)} -c {shlex.quote(corpus_name)}' 
-
-#     print("Running shell command:")
-#     print(full_cmd)  # <-- Useful for debugging
-
-#     result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True)
-
-#     print("Raw CQP output:\n", result.stdout)
-#     print("Raw stderr:\n", result.stderr)
-
-#     # Parse matches (e.g. lines like "117: some text...")
+#     full_query = '\n'.join(commands)
+#     #full_query = f'{corpus_name};\n[word="{query}"];\n'
+    
+#     cmd = ['cqp', '-r', registry, '-c']
+    
+#     print("Running CQP command:", ' '.join(cmd))
+#     print("Sending query:", repr(full_query))
+    
+#     result = subprocess.run(cmd, input=full_query, capture_output=True, text=True)
+    
+#     # print("Raw CQP output:\n", result.stdout)
+#     # print("Raw stderr:\n", result.stderr)
+#     # print("Return code:", result.returncode)
+    
 #     matches = []
 #     for line in result.stdout.splitlines():
 #         m = re.match(r"^\s*(\d+):", line)
 #         if m:
 #             matches.append(int(m.group(1)))
-
+    
 #     return matches
 
-
-
-# # Example
-# # token_ids = cqp_query("word = 'bank'")
-# # print(token_ids)  # [12, 53, 201, ...]
-
-
-# matches = cqp_query("und", corpus_name="CWB_EMBEDDINGS", registry="/home/steffen88/Documents/PHD/Embedding_Queries/cwb_embedding_test/registry")
-# print(matches)
+# # matches = cqp_query('[lemma="der"];')
+# # print(matches)
 
 
 
-# def cqp_query(query, corpus_name, registry):
-#     full_query = f'{corpus_name}; [word="{query}"];'
-#     cmd = f'echo {shlex.quote(full_query)} | cqp -r {shlex.quote(registry)} -c'
+# def create_faiss_subset(matches):
 
-#     print("Running shell command:")
-#     print(cmd)
-
-#     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-
-#     print("Raw CQP output:\n", result.stdout)
-#     print("Raw stderr:\n", result.stderr)
-
-#     matches = []
-#     for line in result.stdout.splitlines():
-#         m = re.match(r"^\s*(\d+):", line)
-#         if m:
-#             matches.append(int(m.group(1)))
-
-#     return matches
-
-# matches = cqp_query("und", corpus_name="CWB_EMBEDDINGS", registry="/home/steffen88/Documents/PHD/Embedding_Queries/cwb_embedding_test/registry")
-# print(matches)
+#     matched_ids_np = np.array(matches, dtype=np.int64)
 
 
+#     vecs = []
+#     ids = []
 
+#     for tok_id in matches:
+#         if tok_id in token_info_by_id:
+#             vec = token_info_by_id[tok_id]["vector"]  # Should be a 1D np.array
+#             vecs.append(vec)
+#             ids.append(tok_id)
+            
+            
+#     vecs_np = np.array(vecs).astype("float32")
+#     ids_np = np.array(ids).astype("int64")
 
+#     faiss.normalize_L2(vecs_np)
 
-def cqp_query(query, corpus_name, registry):
-    commands = [
-        "set AutoShow on;",  # Re-enable automatic display
-        f"{corpus_name};",
-        f'[word="{query}"];',
-    ]
+#     subset_index = faiss.IndexFlatIP(vecs_np.shape[1])  # IP = inner product (for cosine)
+#     subset_index_idmap = faiss.IndexIDMap(subset_index)
+#     subset_index_idmap.add_with_ids(vecs_np, ids_np)
     
-    full_query = '\n'.join(commands)
-    #full_query = f'{corpus_name};\n[word="{query}"];\n'
-    
-    cmd = ['cqp', '-r', registry, '-c']
-    
-    print("Running CQP command:", ' '.join(cmd))
-    print("Sending query:", repr(full_query))
-    
-    result = subprocess.run(cmd, input=full_query, capture_output=True, text=True)
-    
-    # print("Raw CQP output:\n", result.stdout)
-    # print("Raw stderr:\n", result.stderr)
-    # print("Return code:", result.returncode)
-    
-    matches = []
-    for line in result.stdout.splitlines():
-        m = re.match(r"^\s*(\d+):", line)
-        if m:
-            matches.append(int(m.group(1)))
-    
-    return matches
+#     return subset_index_idmap
 
-matches = cqp_query("und", corpus_name="CWB_EMBEDDINGS", registry="/home/steffen88/Documents/PHD/Embedding_Queries/cwb_embedding_test/registry")
-print(matches)
+
+
+# def return_query_faiss_subset(query):
+#     matches = cqp_query(query)
+#     subset_index_idmap=  create_faiss_subset(matches)
+#     return subset_index_idmap
+
+
+# faiss_subset = return_query_faiss_subset('[lemma= "Gesellschaft"];')
+
+# print(type(faiss_subset))
+
