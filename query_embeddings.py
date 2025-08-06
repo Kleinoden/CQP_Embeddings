@@ -191,7 +191,21 @@ def query_embedding_similarity(query,target_word, target_context,  threshold = 0
 
     # Filter results by cosine similarity threshold (e.g., 0.8)
     filtered = [(i, float(d)) for i, d in zip(I[0], D[0]) if d >= threshold]
-    return filtered
+    enriched_results = []
+    for token_id, score in filtered:
+        info = token_info_by_id[int(token_id)]  # cast np.int64 to int, just to be safe
+        enriched_results.append({
+            "token_id": int(token_id),
+            "token": info["token"],
+            "sentence": info["sentence"],
+            "bert_idx": info["bert_idx"],
+            "sent_ind": info["sent_ind"],
+            "text_id": info["text_id"],
+            "similarity": score
+        })
+    
+    
+    return enriched_results
 
 
 
@@ -201,4 +215,10 @@ def query_embedding_similarity(query,target_word, target_context,  threshold = 0
 
 emb_matches = query_embedding_similarity('[lemma= "Gesellschaft"];',"Gesellschaft", "Die Gesellschaft wurde gegründet.")
 
-print("Matches based on embedding similarity: ", emb_matches)
+#print("Matches based on embedding similarity: ", emb_matches)
+
+
+
+# optionally print the top results
+for result in emb_matches:
+    print(f"[{result['similarity']:.3f}] {result['token']} at index {result['token_id']} from text {result['text_id']} in sentence: {result['sentence']}")
