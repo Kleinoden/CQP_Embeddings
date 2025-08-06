@@ -11,6 +11,8 @@ punctuation_set = set(string.punctuation)
 
 with open("/home/steffen88/Documents/PHD/Embedding_Queries/token_info_by_id.pkl", "rb") as f:
     token_info_by_id = pickle.load(f)
+    
+print("token_info_by_id[126]", "\n", token_info_by_id[126]["token"],  "\n", token_info_by_id[126]["sentence"])
 
 
 index_id = faiss.read_index("/home/steffen88/Documents/PHD/Embedding_Queries/bert_token_index.faiss")
@@ -90,12 +92,12 @@ def get_token_embedding(text, target_word):
             target_index = i
             break
 
-    print("\n---")
-    print("text sent: ", text)
-    print("word tokens: ", word_tokens)
-    print("len of word tokens", len(word_tokens))
-    print("len of word embeddings", len(word_embeddings))
-    print("---\n")
+    # print("\n---")
+    # print("text sent: ", text)
+    # print("word tokens: ", word_tokens)
+    # print("len of word tokens", len(word_tokens))
+    # print("len of word embeddings", len(word_embeddings))
+    # print("---\n")
     return word_tokens[i], word_embeddings[i]
 
 
@@ -105,20 +107,21 @@ target_token, target_embedding = get_token_embedding(
     target_word="Gesellschaft"
 )
 
-print("target embedding: ", target_embedding)
+#print("target embedding: ", target_embedding)
 
-def cqp_query(query, corpus_name="CWB_EMBEDDINGS", registry="/home/steffen88/Documents/PHD/Embedding_Queries/cwb_embedding_test/registry"):
+def cqp_query(query, target_token_offset, corpus_name="CWB_EMBEDDINGS", registry="/home/steffen88/Documents/PHD/Embedding_Queries/cwb_embedding_test/registry"):
     commands = [
-        "set AutoShow on;",  # Re-enable automatic display
+        "set AutoShow on;",  
         f"{corpus_name};",
         query,
+        "show +match;"
     ]
     
     full_query = '\n'.join(commands)
     #full_query = f'{corpus_name};\n[word="{query}"];\n'
     
-    cmd = ['cqp', '-r', registry, '-c']
-    
+    cmd = ['cqp', '-r', registry, "-c"]
+    #cmd = ['cqp', '-r', registry,'-f']
     print("Running CQP command:", ' '.join(cmd))
     print("Sending query:", repr(full_query))
     
@@ -130,10 +133,13 @@ def cqp_query(query, corpus_name="CWB_EMBEDDINGS", registry="/home/steffen88/Doc
     
     matches = []
     for line in result.stdout.splitlines():
+        print("line", line)
         m = re.match(r"^\s*(\d+):", line)
         if m:
-            matches.append(int(m.group(1)))
-    
+            print("int(m.group(1))",int(m.group(1)), type(int(m.group(1))))
+            print("target_token_offset",target_token_offset, type(target_token_offset))
+            matches.append(int(m.group(1))+target_token_offset)
+    print("matches: ", matches)
     return matches
 
 
@@ -141,7 +147,7 @@ def cqp_query(query, corpus_name="CWB_EMBEDDINGS", registry="/home/steffen88/Doc
 
 def create_faiss_subset(matches):
 
-    matched_ids_np = np.array(matches, dtype=np.int64)
+    #matched_ids_np = np.array(matches, dtype=np.int64)
 
 
     vecs = []
@@ -167,8 +173,8 @@ def create_faiss_subset(matches):
 
 
 
-def return_query_faiss_subset(query):
-    matches = cqp_query(query)
+def return_query_faiss_subset(query,target_token_offset):
+    matches = cqp_query(query,target_token_offset)
     subset_index_idmap=  create_faiss_subset(matches)
     return subset_index_idmap
 
@@ -177,10 +183,10 @@ def return_query_faiss_subset(query):
 
 
 
-def query_embedding_similarity(query,target_word, target_context,  threshold = 0.8):
+def query_embedding_similarity(query,target_word, target_context,target_token_offset=0,  threshold = 0.8):
     
     
-    faiss_subset = return_query_faiss_subset(query)
+    faiss_subset = return_query_faiss_subset(query,target_token_offset)
     # Get embedding of word "Gesellschaft" in clarifying sentence
     token, query_vec = get_token_embedding(target_context, target_word)
     query_vec_np = query_vec.detach().cpu().numpy().reshape(1, -1)
@@ -189,11 +195,11 @@ def query_embedding_similarity(query,target_word, target_context,  threshold = 0
     # Search for top 50 most similar tokens in the subset FAISS index
     D, I = faiss_subset.search(query_vec.reshape(1, -1), k=50)
 
-    # Filter results by cosine similarity threshold (e.g., 0.8)
+    # Filter results by cosine similarity threshold 
     filtered = [(i, float(d)) for i, d in zip(I[0], D[0]) if d >= threshold]
     enriched_results = []
     for token_id, score in filtered:
-        info = token_info_by_id[int(token_id)]  # cast np.int64 to int, just to be safe
+        info = token_info_by_id[int(token_id)] 
         enriched_results.append({
             "token_id": int(token_id),
             "token": info["token"],
@@ -210,10 +216,11 @@ def query_embedding_similarity(query,target_word, target_context,  threshold = 0
 
 
 
+query = '[lemma= "der"] [lemma= "Gesellschaft"];'
+#query = '[lemma= "Gesellschaft"];'
 
 
-
-emb_matches = query_embedding_similarity('[lemma= "Gesellschaft"];',"Gesellschaft", "Die Gesellschaft wurde gegründet.")
+emb_matches = query_embedding_similarity(query, "Gesellschaft", "Die Gesellschaft wurde gegründet.",target_token_offset=0)
 
 #print("Matches based on embedding similarity: ", emb_matches)
 
