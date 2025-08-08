@@ -19,14 +19,21 @@ import GWG_shareholder_check
 import string
 punctuation_set = set(string.punctuation)
 
-input_path = r'/home/steffen88/Documents/PHD/Embedding_Queries/clean_docs_mus_test'
-output_path = r'/home/steffen88/Documents/PHD/Embedding_Queries/corpus_for_embedding.txt'
+input_path = r'/home/steffen88/Documents/Direga_Docs/EKS Docs/Annotation & Evaluation EKS/clean_docs_mu'
+output_path = r'/home/steffen88/Documents/PHD/Embedding_Queries/muster_embedding_corp_100.txt'
+
+# faiss_path = r"/home/steffen88/Documents/PHD/Embedding_Queries/bert_token_index.faiss"
+# pickle_path = r"/home/steffen88/Documents/PHD/Embedding_Queries/token_info_by_id.pkl"
+
+faiss_path = r"/home/steffen88/Documents/PHD/Embedding_Queries/bert_base_uncased_token_index.faiss"
+pickle_path = r"/home/steffen88/Documents/PHD/Embedding_Queries/bert_base_uncased_token_info_by_id.pkl"
 
 
+#model_name = "deepset/gbert-base"
+model_name = "bert-base-uncased"
 
-
-tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-model = AutoModel.from_pretrained("bert-base-uncased")
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name)
 model.eval()
 
 text = "The bank raised interest rates."
@@ -38,12 +45,33 @@ def split_sent_mus(content):
     new_text = new_text.replace("\n", ' ')
     sentences = GWG_shareholder_check.preprocess_raw(new_text)
     sentences = GWG_shareholder_check.restore_abbreviations(sentences)
-    return sentences
+    len_checked_sents = []
+    for sent in sentences:
+        #print("len of sent ",len(sent.split()))
+        if len(sent.split()) < 150:
+            len_checked_sents.append(sent)
+        else:
+            print("long sentence!!!")
+            split_sent = re.split(r"\s\d\d?\.", sent)
+            for new_sent in split_sent:
+                print("new sent: ", new_sent)
+                len_checked_sents.append(new_sent)
+    return len_checked_sents
 
 
 
 def get_token_embeddings(text):
     tokens = tokenizer(text, return_tensors="pt", return_offsets_mapping=True)
+    #token_strings = tokenizer.convert_ids_to_tokens(tokens["input_ids"][0])
+    token_strings = tokenizer.convert_ids_to_tokens(tokens["input_ids"][0])
+    if len(token_strings) > 512:
+        print("Input too long !!!", len(token_strings))
+        print("from sentence: ", text)
+        return None
+    # print(type(tokens))
+    # print(type(tokens[0]))
+    # print(tokens[0])
+    #print(tokens[0].num_tokens())
     #print("tokens from bert: ", tokens)
     #print('tokens["input_ids"][0]', tokens["input_ids"][0])
     model_inputs = {k: tokens[k] for k in ['input_ids', 'attention_mask', 'token_type_ids'] if k in tokens}
@@ -58,7 +86,9 @@ def get_token_embeddings(text):
     #print("offsets", offsets)
     # Get token ids for mapping back to original text (optional)
     token_strings = tokenizer.convert_ids_to_tokens(tokens["input_ids"][0])
-    #print("length of token strings: ", len(token_strings))
+    if len(token_strings) > 512:
+        print("length of token strings: ", len(token_strings))
+        print("from sentence: ", text)
     
     word_embeddings = []
     word_tokens = []
@@ -112,13 +142,13 @@ def get_token_embeddings(text):
     return subword_embeddings, token_strings, tokens["offset_mapping"][0], word_tokens, word_embeddings
 
 
-embeddings, token_strings, offsets, word_tokens, word_embeddings = get_token_embeddings(text)
+# embeddings, token_strings, offsets, word_tokens, word_embeddings = get_token_embeddings(text)
 
-print("embeddings: " , embeddings)
-print("token strings: ", token_strings)
-print("offsets:", offsets)
-print("word tokens:", word_tokens)
-print("word embeddings:", len(word_embeddings))
+# print("embeddings: " , embeddings)
+# print("token strings: ", token_strings)
+# print("offsets:", offsets)
+# print("word tokens:", word_tokens)
+# print("word embeddings:", len(word_embeddings))
 
 
 
@@ -134,6 +164,7 @@ sent_counter = 0
 with open(output_path, 'w', encoding="utf-8") as output_file:
     output_file.write(f"<corpus>" + '\n')
     for i,filename in enumerate(os.listdir(input_path)):
+                
                 print(f"Processing file {filename}, file  {i} out of {len(os.listdir(input_path))}")
                 if filename.endswith('.txt'):
                     file_path = os.path.join(input_path, filename)
@@ -149,19 +180,25 @@ with open(output_path, 'w', encoding="utf-8") as output_file:
                     output_file.write(f"<text id={filename[:-4]}>" + '\n')
                     sentences = split_sent_mus(content)
                     for sent_ind, sent in enumerate(sentences):
+                        print(f"lenfth of sent num {sent_ind} is {len(sent.split())}")
                         output_file.write(f"<s>" + '\n')
-                       
-                        embeddings, token_strings, offsets, word_tokens, word_embeddings = get_token_embeddings(sent)
+                        result = get_token_embeddings(sent)
+                        if not result:
+                            print(f"sentence number {sent_ind} is too long, skipping it")
+                            continue
+                        else:
+                            embeddings, token_strings, offsets, word_tokens, word_embeddings = get_token_embeddings(sent)
                         doc = Doc(nlp.vocab, words=word_tokens)  # create custom Doc
                         doc = nlp(doc)
                         pos_tags = [token.pos_ for token in doc]
+                        lemmas = [token.lemma_ for token in doc]
                         # for token in doc:
                         #     print("spacy:", token.text, token.pos_, token.tag_)
                         
-                        for i, (vec, tok,pos) in enumerate(zip(word_embeddings, word_tokens, pos_tags)):
+                        for i, (vec, tok,pos,lemma) in enumerate(zip(word_embeddings, word_tokens, pos_tags, lemmas)):
                         
                             
-                            output_file.write(tok +"\t"+pos+ "\n")
+                            output_file.write(tok +"\t"+pos+"\t"+lemma+"\n")
 
                             # Save with CWB token index as key
                             embedding_vectors.append(vec.numpy())
@@ -202,9 +239,9 @@ faiss.normalize_L2(vecs_np)
 index = faiss.IndexFlatIP(vecs_np.shape[1])           # or L2 depending on use
 index_id = faiss.IndexIDMap(index)
 index_id.add_with_ids(vecs_np, ids_np)
-faiss.write_index(index_id, "/home/steffen88/Documents/PHD/Embedding_Queries/bert_token_index.faiss")
+faiss.write_index(index_id, faiss_path)
 
-with open("/home/steffen88/Documents/PHD/Embedding_Queries/token_info_by_id.pkl", "wb") as f:
+with open(pickle_path, "wb") as f:
     pickle.dump(token_info_by_id, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
